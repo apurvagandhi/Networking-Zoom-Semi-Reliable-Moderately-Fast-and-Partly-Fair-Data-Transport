@@ -72,7 +72,7 @@ def main(host, port):
     # intial starting time for probe packet
     starting = time.time()
 
-    while seqno < 5000:
+    while seqno < 180000-N:
         try:
             s.settimeout(timeout)
             (ack, reply_addr) = s.recvfrom(4000)

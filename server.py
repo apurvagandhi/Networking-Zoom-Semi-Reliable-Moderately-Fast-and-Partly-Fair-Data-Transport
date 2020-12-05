@@ -50,6 +50,10 @@ def main(host, port):
     datasink.init(host)
 
     start = time.time()
+
+    lowest_seqno = 0
+    backlog = {}
+
     while True:
         # wait for a packet, and record the time it arrived
         (packet, client_addr) = s.recvfrom(4000)
@@ -58,12 +62,22 @@ def main(host, port):
         # split the packet into header (first 8 bytes) and payload (the rest)
         hdr = packet[0:8]
         payload = packet[8:]
-
+    
         # unpack integers from the header
         (magic, seqno) = struct.unpack(">II", hdr)
 
-        # give the packet to the consumer
-        numTimesSeen = datasink.deliver(seqno, payload)
+        # if this packet is what we're waiting for, pass it on
+        if seqno == lowest_seqno:
+            numTimesSeen = datasink.deliver(seqno, payload)
+            # see if we already have the new packet we're now waiting for
+            lowest_seqno += 1
+            while lowest_seqno in backlog:
+                numTimesSeen = datasink.deliver(lowest_seqno, backlog[lowest_seqno])
+                backlog.pop(lowest_seqno)                   # Remove it once in data sink
+                lowest_seqno += 1
+        # otherwise, save it for later (reordering)
+        else:
+            backlog[seqno] = payload
 
         if verbose >= 2:
             print("Got a packet containing %d bytes from %s" % (len(packet), str(client_addr)))

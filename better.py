@@ -7,11 +7,7 @@
 #
 # Our updated version of the Stop-and-wait client. 
 #
-# What we've added: timeouts and retransmissions
-# 
-# What we havent: The ACK numbers are also completely ignored, so if
-# there packets get duplicated in the network, things will probably go haywire.
-# No send window, sends one packet at a time
+# What we've added: timeouts and retransmissions, reordering, sliding window
 #
 # Run the program like this:
 #   python3 client_saw.py 1.2.3.4 6000
@@ -49,6 +45,10 @@ def main(host, port):
 
     # Window size
     N = 5
+
+    # How often to recalculate RTT, making sure it is greater than the window size
+    RTT_frequency = 300 + N 
+    
     window_ack = []
     for i in range(N):
         window_ack.append(0)
@@ -67,9 +67,14 @@ def main(host, port):
         if verbose >= 3 or (verbose >= 1 and i < 5 or i % 1000 == 0):
             print("Sent packet with seqno %d" % (i))
 
+    # initial timeout
+    timeout = 0.5
+    # intial starting time for probe packet
+    starting = time.time()
+
     while seqno < 5000:
         try:
-            s.settimeout(.5)
+            s.settimeout(timeout)
             (ack, reply_addr) = s.recvfrom(4000)
             #... message received in time, do something with the message ...
 
@@ -77,6 +82,11 @@ def main(host, port):
             (magack, ackno) = struct.unpack(">II", ack)
             if verbose >= 3 or (verbose >= 1 and seqno < 5 or seqno % 1000 == 0):
                 print("Got ack with seqno %d" % (ackno))
+
+            # if this is an ack for a probe packet, calculate how long it took
+            if ackno % RTT_frequency == 0 and ackno != 0:
+                total_time = time.time() - starting
+                timeout = (7/8)*timeout + (1/8)*total_time
 
             # write info about the packet and the ACK to the log file
             trace.write(seqno, tSend - start, ackno, 1)
@@ -92,6 +102,11 @@ def main(host, port):
                 hdr = bytearray(struct.pack(">II", magic, seqno+N))
                 pkt = hdr + body
                 tSend = time.time()
+                
+                # If this is a probe packet, start the timer
+                if (seqno+N) % RTT_frequency == 0 and seqno != 0:
+                    starting = time.time()
+                    
                 s.sendto(pkt, (host, port))
                 if verbose >= 3 or (verbose >= 1 and seqno+N < 5 or seqno+N % 1000 == 0):
                     print("Sent packet with seqno %d" % (seqno+N))
@@ -105,6 +120,10 @@ def main(host, port):
             if window_ack[seqno] == 0:
                 # get some example data to send
                 body = datasource.wait_for_data(seqno)
+
+                # if resending a probe packet, restart the timer
+                if seqno % RTT_frequency == 0 and seqno != 0:
+                    starting = time.time()
                 
                 # make a header, create a packet, and send it
                 hdr = bytearray(struct.pack(">II", magic, seqno))

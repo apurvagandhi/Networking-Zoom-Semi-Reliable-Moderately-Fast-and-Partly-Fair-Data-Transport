@@ -46,24 +46,31 @@ def main(host, port):
 
     start = time.time()
     seqno = 0
-    while seqno < 5000:
-        # get some example data to send
-        body = datasource.wait_for_data(seqno)
 
+    # Window size
+    N = 5
+    window_ack = []
+    for i in range(N):
+        window_ack.append(0)
+
+    tStart = time.time()   # start counting here
+
+    # sending the first N in the window
+    for i in range (0, N):
+        body = datasource.wait_for_data(i)
+        
         # make a header, create a packet, and send it
-        hdr = bytearray(struct.pack(">II", magic, seqno))
+        hdr = bytearray(struct.pack(">II", magic, i))
         pkt = hdr + body
         tSend = time.time()
         s.sendto(pkt, (host, port))
-        if verbose >= 3 or (verbose >= 1 and seqno < 5 or seqno % 1000 == 0):
-            print("Sent packet with seqno %d" % (seqno))
+        if verbose >= 3 or (verbose >= 1 and i < 5 or i % 1000 == 0):
+            print("Sent packet with seqno %d" % (i))
 
-        # wait for an ACK and timeout after 0.5 seconds
-        t = 0.5    # timeout t must be a positive number (in seconds)
+    while seqno < 5000:
         try:
-            s.settimeout(t)
-            (ack, addr) = s.recvfrom(4000)
-            tRecv = time.time()
+            s.settimeout(.5)
+            (ack, reply_addr) = s.recvfrom(4000)
             #... message received in time, do something with the message ...
 
             # unpack integers from the ACK packet, then print some messages
@@ -72,14 +79,41 @@ def main(host, port):
                 print("Got ack with seqno %d" % (ackno))
 
             # write info about the packet and the ACK to the log file
-            trace.write(seqno, tSend - start, ackno, tRecv - start)
-            seqno += 1 # increament seqno
+            trace.write(seqno, tSend - start, ackno, 1)
 
-        # timeout expired but no packet was received yet
+            # whatever ack that we received, record it
+            window_ack[ackno] = 1
+
+            # if this ack was the bottom of our window, move window up so that the bottom
+            # equals the lowest # ack we are waiting for
+            while window_ack[seqno] == 1:
+                # Send seqno + N
+                body = datasource.wait_for_data(seqno+N)
+                hdr = bytearray(struct.pack(">II", magic, seqno+N))
+                pkt = hdr + body
+                tSend = time.time()
+                s.sendto(pkt, (host, port))
+                if verbose >= 3 or (verbose >= 1 and seqno+N < 5 or seqno+N % 1000 == 0):
+                    print("Sent packet with seqno %d" % (seqno+N))
+                # Shift up the end of the window
+                window_ack.append(0)
+                # Shift up beginning of window
+                seqno += 1   
+
         except (socket.timeout, socket.error):
-            print("timeout expired but no packet received yet")
+            #... no packets are ready to be received ...
+            if window_ack[seqno] == 0:
+                # get some example data to send
+                body = datasource.wait_for_data(seqno)
+                
+                # make a header, create a packet, and send it
+                hdr = bytearray(struct.pack(">II", magic, seqno))
+                pkt = hdr + body
+                tSend = time.time()
+                s.sendto(pkt, (host, port))
+                if verbose >= 3 or (verbose >= 1 and seqno < 5 or seqno % 1000 == 0):
+                    print("Sent packet with seqno %d" % (seqno))
 
-        
 
     end = time.time()
     elapsed = end - start

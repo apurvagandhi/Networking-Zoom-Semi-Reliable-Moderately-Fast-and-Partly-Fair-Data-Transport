@@ -75,9 +75,9 @@ def main(host, port):
     while seqno < 180000-N:
         try:
             s.settimeout(timeout)
-            (ack, reply_addr) = s.recvfrom(4000)
+            (ack, reply_addr) = s.recvfrom(100)
             #... message received in time, do something with the message ...
-
+            tRecv = time.time()
             # unpack integers from the ACK packet, then print some messages
             (magack, ackno) = struct.unpack(">II", ack)
             if verbose >= 3 or (verbose >= 1 and seqno < 5 or seqno % 1000 == 0):
@@ -89,7 +89,7 @@ def main(host, port):
                 timeout = (7/8)*timeout + (1/8)*total_time
 
             # write info about the packet and the ACK to the log file
-            trace.write(seqno, tSend - start, ackno, 1)
+            trace.write(seqno, tSend - start, ackno, tRecv - start)
 
             # whatever ack that we received, record it
             window_ack[ackno] = 1
